@@ -1,0 +1,59 @@
+# main_rack_A:
+#   num_x: 4
+#   num_y: 6
+#   x_origin: 13
+#   y_origin: 83.1
+#   z_origin: 0
+#   x_offset: 19.5
+#   y_offset: 18.5
+
+# main_rack_A_down:
+#   num_x: 4
+#   num_y: 6
+#   x_origin: 13
+#   y_origin: 83.1
+#   z_origin: -22
+#   x_offset: 19.5
+#   y_offset: 18.5
+
+main_rack_A:
+  num_x: 6
+  num_y: 8
+  x_origin: 77.5
+  y_origin: 72
+  z_origin: 0
+  x_offset: 13.08
+  y_offset: 13.08
+
+# main_rack_A:
+#   num_x: 6
+#   num_y: 8
+#   x_origin: 77.5
+#   y_origin: 64.6
+#   z_origin: 0
+#   x_offset: 19.2
+#   y_offset: 19.2
+
+#19 difference
+
+main_rack_A_down:
+  num_x: 6
+  num_y: 8
+  x_origin: 13.5
+  y_origin: 86.5
+  z_origin: -16
+  x_offset: 13.08
+  y_offset: 13.08
+
+main_rack_B:
+  num_x: 2
+  num_y: 3
+  x_origin: 67
+  y_origin: 135
+  z_origin: -75
+  x_offset: 80
+  y_offset: 80
+new_location:
+  x_origin: 50
+  y_origin: 50
+  z_origin: 0

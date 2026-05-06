@@ -1,0 +1,262 @@
+<!--
+   This example uses the Go Direct JavaScript library to collect and manipulate data from 2 Vernier Go Direct Sensors. 
+   It also contains the chart.js library for graphing. This program collects 10 data points from each sensor, 
+   graphs them, and disconnects from each device. 
+  -->
+<!doctype html>
+<html>
+
+<head>
+	<title>Line Chart With 2 Go Direct Devices</title>
+  <meta name="description" content="Connect to 2 Vernier Go Direct® Sensors with WebBluetooth and graph 10 points of data each">
+  <meta charset="utf-8">
+  <script src="https://unpkg.com/@vernier/godirect/dist/godirect.min.umd.js"></script>
+  <script src= "https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.8.0/Chart.js"></script>
+
+	<style>
+	canvas{
+		-moz-user-select: none;
+		-webkit-user-select: none;
+		-ms-user-select: none;
+	}
+	</style>
+</head>
+
+<body>
+  <h1>Vernier Go Direct<sup>&reg</sup> JavaScript Advanced Example</h1>
+  <p>
+    This example shows how you can use the <a href="https://www.npmjs.com/package/@vernier/godirect">Vernier Go Direct Module</a> to connect and collect from multiple <a href="https://www.vernier.com/products/sensors/go-direct-sensors/">Vernier Go Direct Sensor</a>.
+  </p>
+	<p id="connection_type">
+		<input type="radio" id="ble" name="type" value="1" checked>
+		<label id="ble_label" for="ble">Bluetooth</label>
+		<input type="radio" id="usb" name="type" value="0">
+		<label id="usb_label" for="usb">USB</label><br>
+	</p>
+  <button id="select_device">Connect to Go Direct Device</button>  
+	<div style="width:75%;">
+		<canvas id="canvas"></canvas>
+	</div>
+  <pre id="output"></pre>
+
+  <script> 
+    
+  // chart.js line colors 
+  window.chartColors = {
+	  red: 'rgb(255, 99, 132)',
+	  orange: 'rgb(255, 159, 64)'
+  };
+   
+  // find the UI elements we need to manipulate
+  const usbBtn = document.querySelector('#usb');
+  const usbLabel = document.querySelector('#usb_label');
+  const bleBtn = document.querySelector('#ble');
+  const bleLabel = document.querySelector('#ble_label');
+  const connectionType = document.querySelector('#connection_type');
+  const selectDeviceBtn = document.querySelector('#select_device');
+  const output = document.querySelector('#output');
+
+  if (navigator.bluetooth) {
+			bleLabel.innerHTML = `Bluetooth`;
+		} else {
+			if (navigator.hid) usbBtn.checked = true;
+			bleLabel.innerHTML = `Bluetooth <span style="color:red">Not Supported</span> <a href="https://webbluetoothcg.github.io/web-bluetooth/">More information</a>`;
+			bleBtn.disabled = true;
+		}
+
+		if (navigator.hid) {
+			usbLabel.innerHTML = `USB`;
+		} else {
+			if (navigator.bluetooth) bleBtn.checked = true;
+			usbLabel.innerHTML = `USB <span style="color:red">Not Supported</span> <a href="https://wicg.github.io/webhid/">More information</a>`;
+			usbBtn.disabled = true;
+		}
+
+		if (!navigator.bluetooth && !navigator.hid) {
+			selectDeviceBtn.style.visibility='hidden';
+		} 
+
+  // Instruct the user to connect the first go device
+  selectDeviceBtn.textContent = `Connect to 1st Go Direct Device`;
+
+  const sensorUnit = "";
+  let deviceObject1 = {device: null};
+  let deviceObject2 = {device: null};
+
+  const selectCorrectDevice = async () => {
+    if (!deviceObject1.device) {
+      await selectDevice(deviceObject1);
+      if (deviceObject1.device) {
+        // Once the first device is connected, instruct the user to connect the second.
+        selectDeviceBtn.textContent = `Connect to 2nd Go Direct Device`;
+      }
+    } else {
+      await selectDevice(deviceObject2);
+      if (deviceObject2.device) {
+        selectDeviceBtn.style.visibility='hidden';
+        connectionType.style.visibility='hidden';
+      }
+    }
+  }; 
+
+  function startMeasurements() {
+    // If we have two devices then start the collection of data
+    if (deviceObject1.device && deviceObject2.device)
+    {
+      deviceObject1.device.start();
+      deviceObject2.device.start();
+    }
+  }
+
+  async function selectDevice(deviceObject) 
+  {
+    const bluetooth = document.querySelector('input[name="type"]:checked').value === "1";
+    try {
+      let deviceSelected;
+
+      if (bluetooth) {
+        if (!navigator.bluetooth) {
+          return Promise.reject(new Error('No Web Bluetooth support.'));
+        }
+
+        deviceSelected = await navigator.bluetooth.requestDevice({
+          filters: [{ namePrefix: 'GDX' }],
+          optionalServices: ['d91714ef-28b9-4f91-ba16-f0d9a604f112']
+        });
+      } else {
+        if (!navigator.hid) {
+          return Promise.reject(new Error('No Web HID support.'));
+        }
+        const devices = await navigator.hid.requestDevice({
+          filters:
+          [
+            {
+              vendorId: 0x08f7,
+              productId: 0x0010
+            },
+          ]
+        });
+        // UI only alllows one at a time anyways so just grab the first one.
+        // eslint-disable-next-line prefer-destructuring
+        deviceSelected = devices[0];
+      }
+
+      if (!deviceSelected) throw new DOMException(`No device selected.`);
+
+      // Create the device but don't open or start measurements.
+      deviceObject.device = await godirect.createDevice(deviceSelected, {open: false, startMeasurements: false});
+  
+      // print message that first device has closed when it's closed
+      deviceObject.device.on('device-closed', () => ((deviceObject) => {
+        if (deviceObject.device) {
+          output.textContent += `\n\nDisconnected from `+deviceObject.device.name;
+          deviceObject.device = null;
+        }
+      })(deviceObject));
+
+      deviceObject.device.on('device-opened', () => ((deviceObject) => {
+        output.textContent += `\nConnected to `+deviceObject.device.name+`\n`;
+
+        // Enable the first sensor
+        const enabledSensor = deviceObject.device.sensors[0];
+        
+        // add line to chart for each sensor
+        const line = addLine(deviceObject.device, enabledSensor);
+
+        enabledSensor.on('value-changed', (sensor) => {
+            // log the sensor name, new value and units.
+            console.log(`Sensor: ${sensor.name} value: ${sensor.value} units: ${sensor.unit}`);
+            // add data from sensor to line 
+            line.data.push(sensor.value);
+            //update line on chart with newest sensor value
+            window.myLine.update();
+            output.textContent += `\n Sensor: ${sensor.name} value: ${sensor.value} units: ${sensor.unit}`;
+
+            // Only collect 10 samples and disconnect
+            if (sensor.values.length >= 10){
+              deviceObject.device.close();
+            }
+        });
+
+        startMeasurements();
+      })(deviceObject));
+      await deviceObject.device.open(false);
+        
+    } catch (err) {
+      console.error(err);
+      deviceObject.device = null;
+    }
+  };
+      
+  // configuration for the chart, change all initial chart settings here
+  const config = {
+    type: 'line',
+			data: {
+				labels: [0,1,2,3,4,5,6,7,8,9,10],
+				datasets: [],
+      },
+        options: {
+				responsive: true,
+				title: {
+					display: true,
+					text: 'Chart.js Line Chart'
+				},
+				tooltips: {
+					mode: 'index',
+					intersect: false,
+				},
+				hover: {
+					mode: 'nearest',
+					intersect: true
+				},
+				scales: {
+					xAxes: [{
+						display: true,
+						scaleLabel: {
+							display: true,
+							labelString: 'Time'
+						}
+					}],
+        yAxes: [{
+          display: true,
+          scaleLabel: {
+            display: true,
+            labelString: 'Value'
+          }
+        }]
+      }
+    } 
+  };		
+    
+  window.onload = function() {
+    const ctx = document.getElementById('canvas').getContext('2d');
+    window.myLine = new Chart(ctx, config);
+  }; 
+  
+  const colorNames = Object.keys(window.chartColors);
+
+  selectDeviceBtn.addEventListener('click', selectCorrectDevice);
+  
+  // add line function to add new dataset for each device connected
+  function addLine(device, sensor){
+    
+    const colorName = colorNames[config.data.datasets.length % colorNames.length];
+    const newColor = window.chartColors[colorName];
+      
+    // config of the new dataset
+    const newDataset = {
+        label: `${device.name}:${sensor.name}`,
+        backgroundColor: newColor,
+        borderColor: newColor,
+        data: [],
+        fill: false
+      };
+      config.data.datasets.push(newDataset);
+      window.myLine.update();
+      // return the dataset to be used later
+      return newDataset;
+    }
+
+	</script>
+</body>
+</html>
