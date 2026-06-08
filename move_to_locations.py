@@ -227,7 +227,7 @@ for i in range(2, 3): # numnber of sample types
         print("Height of sample is: ", height)
 
         for l in range(len(force_newtons)):
-            stress_value = round(((force_newtons[l] / 25520) * 100) * 1000, 4)
+            stress_value = round(((force_newtons[l] / 25520) * 1000) * 1000, 4)
             strain_value = round((distance[l] / height) * 100, 4)
 
             force_mpa.append(stress_value)
