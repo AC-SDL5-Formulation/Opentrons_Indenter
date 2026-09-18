@@ -8,7 +8,7 @@ import yaml
 class CNC_Machine():
     #All of this data could also be stored in a yaml file
     BAUD_RATE = 115200
-    SERIAL_PORT = "/dev/tty.usbserial-1110" #Serial Port
+    SERIAL_PORT = "/dev/ttyUSB0" #Serial Port
     X_LOW_BOUND = 0
     X_HIGH_BOUND = 290
     Y_LOW_BOUND = 0
@@ -20,7 +20,7 @@ class CNC_Machine():
 
     #Tracks the locations
     LOCATIONS = None
-    LOCATION_FILE = 'python/location_status.yaml'
+    LOCATION_FILE = 'location_status.yaml'
 
     VIRTUAL=True #Is this a simulation?
 

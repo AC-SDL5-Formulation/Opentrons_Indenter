@@ -1,3 +1,184 @@
+from cnc_machine import CNC_Machine
+from gdx import gdx
+import time
+import csv
+
+gdx = gdx.gdx()
+
+gdx.open(connection='ble')
+gdx.select_sensors()
+gdx.start()
+
+column_headers = gdx.enabled_sensor_info()   # returns a string with sensor description and units
+print('\n')
+print(column_headers)
+
+cnc = CNC_Machine(virtual=False)
+
+# cnc.home()
+cnc.home()
+cnc.move_to_location(location_name='main_rack_A', location_index=0, safe=True)
+
+# This will store all rows for the CSV
+all_results = []
+
+for q in range(0, 16):
+    measurements = gdx.read()
+    if q > 12:
+        blank = measurements[0]
+        print(blank)
+
+final_measurement = gdx.readValues()
+
+# ------------------ Adjust sample locations below ---------------------
+
+for i in range(0, 4): # number of samples
+    for j in range(3, 6): # number of replicates
+        force_newtons = []
+        force_mpa = []
+        distance = []
+        compression_percent = []
+        final_measurement = 90
+        maximum_force = 5# maximum force applied in Newtons, used as a stopping point for the test
+
+        sample_number = j + 1
+        replicate_number = i + 1
+        sample_label = f"sample {sample_number} replicate {replicate_number}"
+
+        cnc.move_to_location('main_rack_A', (j+ (i*6)), safe=True)
+        gdx.start()
+
+        for k in range(0, 50):
+            # change expected sample height here
+            expected_height = 18  # expected height of the sample in mm, used as a starting point for the test
+            cnc.move_to_point(z=-expected_height-(0.5 * k))
+            print("first")
+            final_measurement = 0
+
+            for q in range(0, 8):
+                measurements = gdx.read()
+                print(measurements)
+                if q > 6:
+                    final_measurement = measurements[0] - blank
+                    print(final_measurement)
+
+            if final_measurement > 0.07:
+                z_value = (- expected_height - (0.5 * k)) + 0.6
+                break
+
+        cnc.move_to_point(z=z_value)
+
+        for r in range(0, 100):
+            cnc.move_to_point(z=z_value - (0.1 * r))
+            print("second")
+            final_measurement = 0
+
+            for q in range(0, 8):
+                measurements = gdx.read()
+                if q > 6:
+                    final_measurement = measurements[0] - blank
+                    print(final_measurement)
+
+            if final_measurement > 0.05:
+                z_value = (z_value - (0.1 * r)) + 0.15
+                break
+
+        height = ((z_value - (0.05 * r)) + 22)
+
+        
+
+        for r in range(0, 1000):
+            cnc.move_to_point(z=z_value - (0.05 * r))
+            print("third")
+            final_measurement = 0
+
+            for q in range(0, 8):
+                measurements = gdx.read()
+                if q > 6:
+                    final_measurement = measurements[0] - blank
+                    force_newtons.append(round(final_measurement, 4))
+                    distance.append(round(0.05 * r, 2))
+                    print(final_measurement)
+
+            if final_measurement > maximum_force:
+                break
+
+            if len(force_newtons) > maximum_force and force_newtons[-1] < 0.65 * force_newtons[-2] and force_newtons[-1] > 0.1:
+                break
+
+            print("_____________________________________")
+            print("force (N): ", force_newtons)
+            print("distance (mm): ", distance)
+
+        print("")
+        print("_____________________________________")
+        print("Sample number: ", sample_number)
+        print("Replicate number: ", replicate_number)
+        print("")
+        print("Height of sample is: ", height)
+
+        for l in range(len(force_newtons)):
+            stress_value = round(((force_newtons[l] / 25520) * 1000) * 1000, 4)  # ((F/A_probe_mm2)x1000 to convert to m2) x 1000 to convert Pa to kPa
+            strain_value = round((distance[l] / height) * 100, 4)
+
+            force_mpa.append(stress_value)
+            compression_percent.append(strain_value)
+
+            # Save each point as one row for the CSV
+            all_results.append({
+                "sample": sample_number,
+                "replicate": replicate_number,
+                "sample_label": sample_label,
+                "point_index": l + 1,
+                "height": height,                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               
+                "distance_mm": distance[l],
+                "force_N": force_newtons[l],
+                "strain_percent": strain_value,
+                "stress_mPa": stress_value
+                
+                
+            })
+
+        print("Stress, in mPa: ", force_mpa)
+        print("Strain, in %: ", compression_percent)
+
+# Write everything to CSV at the end
+csv_file_name = "20260805_D100_1-2.5mmol_0.1wt%PDA.csv" # Change csv file name here
+
+with open(csv_file_name, mode="w", newline="") as file:
+    writer = csv.DictWriter(
+        file,
+        fieldnames=[
+            "sample",
+            "replicate",
+            "sample_label",
+            "point_index",
+            "height",
+            "distance_mm",
+            "force_N",
+            "strain_percent",
+            "stress_mPa"
+        ]
+    )
+    writer.writeheader()
+    writer.writerows(all_results)
+
+print("")
+print("CSV file saved as:", csv_file_name)
+
+cnc.home()
+gdx.close()
+
+
+
+
+
+
+
+
+
+
+
 # from cnc_machine import CNC_Machine
 
 # from gdx import gdx
@@ -109,6 +290,7 @@
 
 
 
+<<<<<<< Updated upstream
 
 
 from cnc_machine import CNC_Machine
@@ -277,3 +459,5 @@ print("CSV file saved as:", csv_file_name)
 
 cnc.home()
 gdx.close()
+=======
+>>>>>>> Stashed changes
