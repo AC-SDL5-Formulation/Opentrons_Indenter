@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Automated Indenter</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-title">
+      <div class="lab-tag">SELF-DRIVING LAB #5 — FORMULATION</div>
+      <h1>Automated Indenter</h1>
+    </div>
+    <div class="topbar-right">
+      <div id="run-pill" class="run-pill idle">IDLE</div>
+      <div class="connection-wrap">
+        <span class="connection-label">LINK</span>
+        <span id="link-dot" class="connection-dot disconnected"></span>
+      </div>
+      <button type="button" class="btn btn-start btn-topbar" id="btnStart" disabled>Start</button>
+      <button type="button" class="btn btn-stop btn-topbar" id="btnStop" disabled>Stop</button>
+      <button type="button" class="btn btn-home btn-topbar" id="btnHome" disabled>Home</button>
+    </div>
+  </header>
+
+  <div class="instrument-status-strip">
+    <div id="cnc-pill" class="instrument-pill disconnected">
+      <span class="instrument-dot"></span>
+      <span class="instrument-name">CNC</span>
+      <span class="instrument-state" id="cnc-state">not connected</span>
+    </div>
+    <div id="force-pill" class="instrument-pill disconnected">
+      <span class="instrument-dot"></span>
+      <span class="instrument-name">Force</span>
+      <span class="instrument-state" id="force-state">not connected</span>
+    </div>
+    <div id="ot-pill" class="instrument-pill disconnected">
+      <span class="instrument-dot"></span>
+      <span class="instrument-name">Opentrons</span>
+      <span class="instrument-state" id="ot-state">no protocol yet</span>
+    </div>
+    <div class="live-force">
+      Force <span id="live-force" class="mono">—</span> N
+    </div>
+  </div>
+
+  <nav class="tab-strip" aria-label="Dashboard sections">
+    <button type="button" class="tab-btn active" data-tab="connect">Connect</button>
+    <button type="button" class="tab-btn" data-tab="run">Run</button>
+    <button type="button" class="tab-btn" data-tab="prep">Prep</button>
+    <button type="button" class="tab-btn" data-tab="results">Results</button>
+  </nav>
+
+  <main class="page">
+    <section id="tab-connect" class="tab-panel active">
+      <div class="connect-grid">
+        <div class="card">
+          <h2>1. CNC mill</h2>
+          <p class="hint">Power the 3018, plug in USB, then Find ports. Green means GRBL answered Idle.</p>
+          <div class="field-row">
+            <label for="cnc-port">Serial port</label>
+            <select id="cnc-port"></select>
+            <button type="button" class="btn subtle" id="btnFindPorts">Find ports</button>
+          </div>
+          <div class="button-row">
+            <button type="button" class="btn btn-start" id="btnCncConnect">Connect</button>
+            <button type="button" class="btn subtle" id="btnCncDisconnect">Disconnect</button>
+          </div>
+          <p class="status-text" id="cnc-msg">Waiting…</p>
+        </div>
+
+        <div class="card">
+          <h2>2. Force sensor (Bluetooth)</h2>
+          <p class="hint">Turn the Go Direct sensor on, then Scan. Pick GDX-FOR. A live Newton reading is the proof it worked. Graphical Analysis must be closed.</p>
+          <div class="button-row">
+            <button type="button" class="btn subtle" id="btnForceScan">Scan Bluetooth</button>
+            <button type="button" class="btn btn-start" id="btnForceConnect">Connect</button>
+            <button type="button" class="btn subtle" id="btnForceZero">Zero</button>
+          </div>
+          <select id="gdx-list" size="4" class="device-list"></select>
+          <p class="status-text" id="force-msg">Waiting…</p>
+        </div>
+
+        <div class="card">
+          <h2>3. Home &amp; jog</h2>
+          <p class="hint">Home raises Z first, then returns to origin. Jog only after a successful home so the mill knows where it is.</p>
+          <div class="button-row">
+            <button type="button" class="btn btn-home" id="btnHomeCard">Home</button>
+          </div>
+          <div class="jog-grid">
+            <span></span>
+            <button type="button" class="btn subtle jog" data-jog="y+" title="Y+">Y+</button>
+            <span></span>
+            <button type="button" class="btn subtle jog" data-jog="x-">X−</button>
+            <button type="button" class="btn subtle jog" data-jog="z+">Z+</button>
+            <button type="button" class="btn subtle jog" data-jog="x+">X+</button>
+            <span></span>
+            <button type="button" class="btn subtle jog" data-jog="y-">Y−</button>
+            <button type="button" class="btn subtle jog" data-jog="z-">Z−</button>
+          </div>
+          <label class="jog-step-label">Jog step (mm)
+            <input id="jog-step" type="number" step="0.1" value="1">
+          </label>
+          <p class="mono" id="pos-readout">X — &nbsp; Y — &nbsp; Z —</p>
+        </div>
+
+        <div class="card virtual-card">
+          <h2>Virtual mode</h2>
+          <p class="hint">Learn the dashboard with no hardware. G-code is printed in the terminal and force is simulated.</p>
+          <label class="ui-switch-row">
+            <span class="ui-switch">
+              <input type="checkbox" id="virtual-toggle">
+              <span class="ui-switch-track"></span>
+            </span>
+            <span class="ui-switch-label">Virtual CNC + force</span>
+          </label>
+          <p class="status-text" id="connect-summary">Start stays locked until CNC and Force are green, or Virtual is on.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-run" class="tab-panel">
+      <div class="run-grid">
+        <div class="card">
+          <div class="card-title-row">
+            <h2>Wells</h2>
+            <div class="legend-inline">
+              <span><i class="swatch pending"></i>Selected</span>
+              <span><i class="swatch active"></i>Active</span>
+              <span><i class="swatch done"></i>Done</span>
+              <span><i class="swatch skipped"></i>Skipped</span>
+            </div>
+          </div>
+          <p class="hint">Click wells on <span class="mono">main_rack_A</span>. Run order is left-to-right, top-to-bottom among selected wells.</p>
+          <div id="well-grid" class="well-grid"></div>
+          <div class="button-row">
+            <button type="button" class="btn subtle" id="btnSelectNone">Clear</button>
+            <button type="button" class="btn subtle" id="btnSelectRow0">First row</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Design experiment</h2>
+          <form id="run-form" class="run-form">
+            <label>Experiment name
+              <input id="experiment-name" type="text" placeholder="e.g. hydrogel batch 18 Apr">
+            </label>
+            <label>Mode
+              <select id="run-mode">
+                <option value="stress_strain">Stress–strain</option>
+                <option value="relaxation">Relaxation</option>
+              </select>
+            </label>
+            <div class="dual-fields">
+              <label>Contact area (mm²)
+                <input id="contact-area" type="number" step="0.01" value="25.52">
+              </label>
+              <label>Expected height (mm)
+                <input id="expected-height" type="number" step="0.1" value="0">
+              </label>
+            </div>
+            <p class="formula-hint">σ (MPa) = F (N) / A (mm²). Default A = 25.52 mm² from the old 25520 constant. Force is always stored so stress can be recomputed. Do not mix these CSVs with older runs.</p>
+            <div class="dual-fields">
+              <label>Force stop (N)
+                <input id="force-stop" type="number" step="0.1" value="2">
+              </label>
+              <label>Crack drop
+                <input id="crack-drop" type="number" step="0.05" min="0" max="1" value="0.65">
+              </label>
+            </div>
+            <label id="relax-hold-wrap">Relaxation hold (fraction of height)
+              <input id="relax-hold" type="number" step="0.01" value="0.05">
+            </label>
+            <div class="toggles">
+              <label class="ui-switch-row"><span class="ui-switch"><input type="checkbox" id="tog-coarse" checked><span class="ui-switch-track"></span></span><span class="ui-switch-label">Coarse approach</span></label>
+              <label class="ui-switch-row"><span class="ui-switch"><input type="checkbox" id="tog-fine" checked><span class="ui-switch-track"></span></span><span class="ui-switch-label">Fine approach</span></label>
+              <label class="ui-switch-row"><span class="ui-switch"><input type="checkbox" id="tog-indent" checked><span class="ui-switch-track"></span></span><span class="ui-switch-label">Indent (or hold in relaxation)</span></label>
+              <label class="ui-switch-row"><span class="ui-switch"><input type="checkbox" id="tog-crack" checked><span class="ui-switch-track"></span></span><span class="ui-switch-label">Stop on crack</span></label>
+              <label class="ui-switch-row"><span class="ui-switch"><input type="checkbox" id="tog-home" checked><span class="ui-switch-track"></span></span><span class="ui-switch-label">Home at end</span></label>
+            </div>
+          </form>
+          <p class="protocol-line" id="protocol-line">Waiting for run…</p>
+        </div>
+
+        <div class="card fill-col">
+          <h2>Live curve</h2>
+          <div class="plot-wrap">
+            <canvas id="force-plot"></canvas>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-prep" class="tab-panel">
+      <div class="prep-grid">
+        <div class="card">
+          <h2>Opentrons prep</h2>
+          <p class="hint">This site does not start the OT-2. Toggle the steps you used to comment in/out, download the protocol, then import it in the Opentrons App. Custom labware <span class="mono">allen_8_wellplate_20000ul</span> and <span class="mono">testwell</span> must already be on that robot. The UV lamp serial line is not included.</p>
+          <label>Replicates
+            <input id="ot-replicates" type="number" min="1" step="1" value="7">
+          </label>
+          <div class="toggles">
+            <label class="ui-switch-row"><span class="ui-switch"><input type="checkbox" id="ot-d-dmam"><span class="ui-switch-track"></span></span><span class="ui-switch-label">Dispense DMAm</span></label>
+            <label class="ui-switch-row"><span class="ui-switch"><input type="checkbox" id="ot-d-amps"><span class="ui-switch-track"></span></span><span class="ui-switch-label">Dispense AMPS</span></label>
+            <label class="ui-switch-row"><span class="ui-switch"><input type="checkbox" id="ot-d-xl"><span class="ui-switch-track"></span></span><span class="ui-switch-label">Dispense crosslinker</span></label>
+            <label class="ui-switch-row"><span class="ui-switch"><input type="checkbox" id="ot-d-pi"><span class="ui-switch-track"></span></span><span class="ui-switch-label">Dispense photoinitiator</span></label>
+            <label class="ui-switch-row"><span class="ui-switch"><input type="checkbox" id="ot-d-pbs"><span class="ui-switch-track"></span></span><span class="ui-switch-label">Dispense PBS</span></label>
+            <label class="ui-switch-row"><span class="ui-switch"><input type="checkbox" id="ot-mix"><span class="ui-switch-track"></span></span><span class="ui-switch-label">Pipette mix</span></label>
+            <label class="ui-switch-row"><span class="ui-switch"><input type="checkbox" id="ot-stir"><span class="ui-switch-track"></span></span><span class="ui-switch-label">Stir-plate wait (120 s)</span></label>
+            <label class="ui-switch-row"><span class="ui-switch"><input type="checkbox" id="ot-transfer"><span class="ui-switch-track"></span></span><span class="ui-switch-label">Transfer to test plate</span></label>
+            <label class="ui-switch-row"><span class="ui-switch"><input type="checkbox" id="ot-uv" checked><span class="ui-switch-track"></span></span><span class="ui-switch-label">UV-stand pickup / dropoff</span></label>
+          </div>
+        </div>
+        <div class="card">
+          <h2>Volumes (µL per well, before × replicates)</h2>
+          <div class="tbl-wrap">
+            <table class="vol-table">
+              <thead>
+                <tr><th>Exp</th><th>DMAm</th><th>AMPS</th><th>PBS</th><th>XL</th><th>PI</th></tr>
+              </thead>
+              <tbody id="vol-body"></tbody>
+            </table>
+          </div>
+          <div class="button-row">
+            <button type="button" class="btn btn-start" id="btnOtGenerate">Generate protocol</button>
+            <button type="button" class="btn subtle" id="btnOtDownload" disabled>Download protocol.py</button>
+          </div>
+          <p class="status-text" id="ot-msg">No protocol generated yet.</p>
+          <ol class="checklist">
+            <li>Generate and download the protocol.</li>
+            <li>Open the Opentrons App on the robot computer.</li>
+            <li>Import the downloaded <span class="mono">.py</span> file.</li>
+            <li>Calibrate labware, then Run on the OT-2.</li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-results" class="tab-panel">
+      <div class="card">
+        <div class="card-title-row">
+          <h2>Last run</h2>
+          <button type="button" class="btn subtle" id="btnDownloadCsv">Download CSV</button>
+        </div>
+        <p class="hint" id="results-hint">Nothing saved yet.</p>
+        <div class="tbl-wrap">
+          <table class="chan-table">
+            <thead>
+              <tr>
+                <th>Well</th><th>Point</th><th>Force (N)</th><th>Stress (MPa)</th>
+                <th>Distance (mm)</th><th>Time (s)</th>
+              </tr>
+            </thead>
+            <tbody id="results-body"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <h2>History on this lab PC</h2>
+        <ul id="history-list" class="history-list"></ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="tab-signature">Acceleration Consortium · Ian Ngunga · 2026</footer>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+.venv/
+venv/
+web_ui/data/*
+!web_ui/data/.gitkeep
+results/*.csv
+*.egg-info/
+.cursor/
