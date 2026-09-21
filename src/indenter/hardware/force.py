@@ -57,8 +57,10 @@ class ForceSensor:
         except Exception as exc:
             self.last_error = str(exc)
             raise ForceSensorError(
-                "Bluetooth scan failed. Turn the sensor on, confirm Mac Bluetooth "
-                "is on, and allow Python Bluetooth access in System Settings → Privacy."
+                "Bluetooth scan failed. Turn the sensor on and close Graphical Analysis "
+                "if it is open. On the Raspberry Pi run: sudo systemctl start bluetooth "
+                "then bluetoothctl power on. Your user must be in the bluetooth group. "
+                "If the list is still empty: rfkill unblock bluetooth and check hci0."
             ) from exc
 
     def connect(self, device_name: str, sensor_number: int = 1) -> str:

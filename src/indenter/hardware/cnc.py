@@ -23,7 +23,7 @@ class CNCMotionError(Exception):
 
 class CNC_Machine:
     BAUD_RATE = 115200
-    DEFAULT_PORT = "/dev/tty.usbserial-1110"
+    DEFAULT_PORT = "/dev/ttyUSB0"
     X_LOW_BOUND = 0
     X_HIGH_BOUND = 290
     Y_LOW_BOUND = 0

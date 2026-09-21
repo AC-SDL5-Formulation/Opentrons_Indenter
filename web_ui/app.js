@@ -492,5 +492,64 @@
     loadHistory();
   }
 
+  const UI_MODE_KEY = "indenter.uiMode";
+
+  function getUIMode() {
+    return localStorage.getItem(UI_MODE_KEY) === "high" ? "high" : "low";
+  }
+
+  function setUIMode(mode) {
+    localStorage.setItem(UI_MODE_KEY, mode === "high" ? "high" : "low");
+    location.reload();
+  }
+
+  function ensureUIMode() {
+    if (localStorage.getItem(UI_MODE_KEY)) return;
+    const overlay = document.createElement("div");
+    overlay.className = "mode-modal-overlay";
+    overlay.innerHTML = `
+      <div class="mode-dialog" role="dialog" aria-modal="true" aria-labelledby="modeDialogTitle">
+        <h2 id="modeDialogTitle">Choose display mode for this device</h2>
+        <p>This choice is saved on this device only. Low Object is recommended for the lab Raspberry Pi.</p>
+        <div class="mode-dialog-options">
+          <button type="button" class="mode-option-btn recommended" data-mode="low">
+            <span class="mode-option-badge">Recommended</span>
+            Low Object
+            <span class="mode-option-sub">Lightweight: no blur or animations. Best for the Raspberry Pi.</span>
+          </button>
+          <button type="button" class="mode-option-btn" data-mode="high">
+            High Object
+            <span class="mode-option-sub">Rich glass effects. Best for a laptop.</span>
+          </button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    document.body.style.overflow = "hidden";
+    const blockEscape = (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    document.addEventListener("keydown", blockEscape, true);
+    overlay.querySelectorAll(".mode-option-btn").forEach((btn) => {
+      btn.addEventListener("click", () => setUIMode(btn.dataset.mode));
+    });
+  }
+
+  function setupObjectModeSwitch() {
+    const toggle = $("objectModeToggle");
+    const wrap = document.querySelector(".object-mode-switch");
+    if (!toggle) return;
+    const mode = getUIMode();
+    toggle.checked = mode === "high";
+    if (wrap) wrap.setAttribute("data-active", mode);
+    toggle.addEventListener("change", () => {
+      setUIMode(toggle.checked ? "high" : "low");
+    });
+  }
+
+  ensureUIMode();
+  setupObjectModeSwitch();
   boot();
 })();

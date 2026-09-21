@@ -5,12 +5,27 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Automated Indenter</title>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
+  <script>
+    (function () {
+      var mode = localStorage.getItem("indenter.uiMode");
+      var href = mode === "high" ? "style.css" : "style-low.css";
+      document.write('<link rel="stylesheet" href="' + href + '">');
+    })();
+  </script>
+  <noscript><link rel="stylesheet" href="style-low.css"></noscript>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
   <header class="topbar">
+    <div class="object-mode-switch" title="High Object uses rich glass effects; Low Object is lightweight for the Raspberry Pi">
+      <span class="object-mode-label" data-mode="low">Low Object</span>
+      <label class="object-mode-toggle">
+        <input type="checkbox" id="objectModeToggle">
+        <span class="object-mode-slider"></span>
+      </label>
+      <span class="object-mode-label" data-mode="high">High Object</span>
+    </div>
     <div class="topbar-title">
       <div class="lab-tag">SELF-DRIVING LAB #5 — FORMULATION</div>
       <h1>Automated Indenter</h1>
@@ -60,7 +75,7 @@
       <div class="connect-grid">
         <div class="card">
           <h2>1. CNC mill</h2>
-          <p class="hint">Power the 3018, plug in USB, then Find ports. Green means GRBL answered Idle.</p>
+          <p class="hint">Power the 3018, plug in USB, then Find ports. On the Raspberry Pi expect <span class="mono">/dev/ttyUSB0</span> or <span class="mono">/dev/ttyACM0</span> (your user must be in the <span class="mono">dialout</span> group). Green means GRBL answered Idle.</p>
           <div class="field-row">
             <label for="cnc-port">Serial port</label>
             <select id="cnc-port"></select>
@@ -75,7 +90,7 @@
 
         <div class="card">
           <h2>2. Force sensor (Bluetooth)</h2>
-          <p class="hint">Turn the Go Direct sensor on, then Scan. Pick GDX-FOR. A live Newton reading is the proof it worked. Graphical Analysis must be closed.</p>
+          <p class="hint">Turn the Go Direct sensor on and close Graphical Analysis if it is open. On the Pi: <span class="mono">bluetoothctl power on</span>, and your user must be in the <span class="mono">bluetooth</span> group. Scan, pick GDX-FOR; a live Newton reading is the proof. If scan is empty: <span class="mono">rfkill unblock bluetooth</span> and check <span class="mono">hci0</span>.</p>
           <div class="button-row">
             <button type="button" class="btn subtle" id="btnForceScan">Scan Bluetooth</button>
             <button type="button" class="btn btn-start" id="btnForceConnect">Connect</button>

@@ -1,0 +1,34 @@
+/* Low Object Mode — GPU-friendly skin for the lab Raspberry Pi.
+   Imports the full High Object theme, then strips blur, mesh, and animations. */
+
+@import url("style.css");
+
+*, *::before, *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  animation: none !important;
+}
+
+body {
+  background-image: none !important;
+  background: rgb(232, 240, 238) !important;
+  background-attachment: scroll !important;
+}
+
+.topbar,
+.card,
+.instrument-pill,
+.tab-strip,
+.tab-btn.active,
+.run-pill,
+.connection-wrap,
+.protocol-line,
+.formula-hint {
+  background: rgba(255, 255, 255, 0.92) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.topbar::before {
+  display: none !important;
+}

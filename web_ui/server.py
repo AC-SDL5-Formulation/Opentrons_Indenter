@@ -261,7 +261,7 @@ def api_force_scan():
                 {
                     "ok": True,
                     "devices": [],
-                    "error": "No Go Direct device found. Turn the sensor on, confirm Mac Bluetooth is on, and allow Python Bluetooth access in System Settings → Privacy.",
+                    "error": "No Go Direct device found. Turn the sensor on and close Graphical Analysis if it is open. On the Raspberry Pi: sudo systemctl start bluetooth, then bluetoothctl power on. Your user must be in the bluetooth group. If still empty: rfkill unblock bluetooth and check hci0.",
                 }
             )
         return jsonify({"ok": True, "devices": devices})
