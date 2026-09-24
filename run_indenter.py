@@ -3,7 +3,7 @@
 
     python run_indenter.py
 
-Opens http://localhost:8766 (set INDENTER_UI_OPEN_BROWSER=0 to skip the browser).
+Opens http://localhost:8767 (set INDENTER_UI_OPEN_BROWSER=0 to skip the browser).
 """
 
 from __future__ import annotations

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Indenter dashboard: Flask + SocketIO on localhost:8766."""
+"""Indenter dashboard: Flask + SocketIO on localhost:8767."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ from indenter.run.settings import RunSettings  # noqa: E402
 
 UI_DIR = Path(__file__).resolve().parent
 HOST = os.environ.get("INDENTER_UI_HOST", "127.0.0.1")
-PORT = int(os.environ.get("INDENTER_UI_PORT", "8766"))
+PORT = int(os.environ.get("INDENTER_UI_PORT", "8767"))
 
 app = Flask(__name__, static_folder=str(UI_DIR), static_url_path="")
 app.config["SECRET_KEY"] = "indenter-local"
