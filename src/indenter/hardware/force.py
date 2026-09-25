@@ -53,6 +53,7 @@ class _BleExecutor:
         self._thread = threading.Thread(target=self._loop, name="gdx-ble", daemon=True)
         self._started = False
         self._guard = threading.Lock()
+        self.allow_pump = False
 
     def _loop(self) -> None:
         loop = _ensure_event_loop()
@@ -60,12 +61,14 @@ class _BleExecutor:
             try:
                 job = self._jobs.get(timeout=0.05)
             except queue.Empty:
-                # Keep bleak notifications flowing between Scan/Connect/read jobs.
-                try:
-                    if not loop.is_closed():
-                        loop.run_until_complete(asyncio.sleep(0.02))
-                except Exception:
-                    pass
+                # Only pump after the sensor is open. Pumping during open()
+                # steals the status packet and godirect raises struct.error.
+                if self.allow_pump:
+                    try:
+                        if not loop.is_closed():
+                            loop.run_until_complete(asyncio.sleep(0.02))
+                    except Exception:
+                        pass
                 continue
             if job is None:
                 return
@@ -120,6 +123,7 @@ class ForceSensor:
         return _ble.submit(self._scan_ble_locked)
 
     def _scan_ble_locked(self) -> List[dict]:
+        _ble.allow_pump = False
         GoDirect = self._import_godirect()
         _ensure_event_loop()
         adapter = GoDirect(use_ble=True, use_usb=False)
@@ -151,6 +155,7 @@ class ForceSensor:
         return _ble.submit(self._connect_locked, device_name, sensor_number)
 
     def _connect_locked(self, device_name: str, sensor_number: int) -> str:
+        _ble.allow_pump = False
         self.disconnect()
         GoDirect = self._import_godirect()
         _ensure_event_loop()
@@ -170,24 +175,39 @@ class ForceSensor:
                     f"Could not find {device_name}. Seen: {', '.join(names) or 'none'}. "
                     "Turn the sensor on, then Scan again."
                 )
-            try:
-                opened = match.open(auto_start=False)
-            except TypeError:
-                opened = match.open()
+            opened = False
+            last_exc = None
+            for attempt in range(3):
+                try:
+                    opened = bool(match.open())
+                    if opened:
+                        break
+                except Exception as exc:
+                    last_exc = exc
+                    try:
+                        match.close()
+                    except Exception:
+                        pass
+                    time.sleep(0.5)
             if not opened:
                 raise ForceSensorError(
-                    f"Could not open {device_name}. Close Graphical Analysis and Scan again."
-                )
+                    f"Could not open {device_name}"
+                    + (f" ({type(last_exc).__name__}: {last_exc})" if last_exc else "")
+                    + ". Close Graphical Analysis, power-cycle the sensor, then Scan again."
+                ) from last_exc
             match.enable_sensors(sensors=[sensor_number])
-            match.start(period=100)
+            match.start(period=200)
             time.sleep(0.3)
             self._sensors = match.get_enabled_sensors() or []
             self._godirect = adapter
             self._device = match
+            _ble.allow_pump = True
         except ForceSensorError:
+            _ble.allow_pump = False
             self._quit_adapter(adapter)
             raise
         except Exception as exc:
+            _ble.allow_pump = False
             self._quit_adapter(adapter)
             self.connected = False
             self.last_error = f"{type(exc).__name__}: {exc}"
@@ -224,6 +244,7 @@ class ForceSensor:
             self._disconnect_locked()
 
     def _disconnect_locked(self) -> None:
+        _ble.allow_pump = False
         if self._device is not None:
             try:
                 self._device.stop()
