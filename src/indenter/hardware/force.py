@@ -1,14 +1,21 @@
 """Go Direct force sensor wrapper. Bluetooth only for V1; no terminal prompts.
 
 Scan and connect use GoDirect(use_ble=True) the same way the Pi Test B command
-does. The gdx helper re-inits BLE from use_ble=False and finds nothing on Linux.
+does. Flask serves each request on a worker thread; bleak needs an asyncio loop
+on that thread, so all BLE work is serialized onto one dedicated thread.
 """
 
 from __future__ import annotations
 
+import asyncio
+import logging
+import queue
 import random
+import threading
 import time
 from typing import List, Optional
+
+log = logging.getLogger(__name__)
 
 
 class ForceSensorError(Exception):
@@ -24,6 +31,57 @@ def _device_rssi(device):
     if rssi is None:
         rssi = getattr(device, "_rssi", None)
     return rssi
+
+
+def _ensure_event_loop():
+    """Create an asyncio loop on this thread if bleak/godirect would not find one."""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            raise RuntimeError("closed")
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    return loop
+
+
+class _BleExecutor:
+    """Run GoDirect calls on one thread that owns the BLE event loop."""
+
+    def __init__(self):
+        self._jobs: queue.Queue = queue.Queue()
+        self._thread = threading.Thread(target=self._loop, name="gdx-ble", daemon=True)
+        self._started = False
+        self._guard = threading.Lock()
+
+    def _loop(self) -> None:
+        _ensure_event_loop()
+        while True:
+            job = self._jobs.get()
+            if job is None:
+                return
+            fn, args, kwargs, reply = job
+            try:
+                reply.put((True, fn(*args, **kwargs)))
+            except Exception as exc:
+                reply.put((False, exc))
+
+    def submit(self, fn, *args, **kwargs):
+        if threading.current_thread() is self._thread:
+            return fn(*args, **kwargs)
+        with self._guard:
+            if not self._started:
+                self._thread.start()
+                self._started = True
+        reply: queue.Queue = queue.Queue()
+        self._jobs.put((fn, args, kwargs, reply))
+        ok, payload = reply.get()
+        if not ok:
+            raise payload
+        return payload
+
+
+_ble = _BleExecutor()
 
 
 class ForceSensor:
@@ -46,7 +104,11 @@ class ForceSensor:
     def scan_ble(self) -> List[dict]:
         if self.VIRTUAL:
             return [{"name": "GDX-FOR VIRTUAL", "rssi": -40}]
+        return _ble.submit(self._scan_ble_locked)
+
+    def _scan_ble_locked(self) -> List[dict]:
         GoDirect = self._import_godirect()
+        _ensure_event_loop()
         adapter = GoDirect(use_ble=True, use_usb=False)
         try:
             found = adapter.list_devices() or []
@@ -55,12 +117,11 @@ class ForceSensor:
                 devices.append({"name": _device_name(device), "rssi": _device_rssi(device)})
             return devices
         except Exception as exc:
-            self.last_error = str(exc)
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            log.exception("Bluetooth scan failed")
             raise ForceSensorError(
-                "Bluetooth scan failed. Turn the sensor on and close Graphical Analysis "
-                "if it is open. On the Raspberry Pi run: sudo systemctl start bluetooth "
-                "then bluetoothctl power on. Your user must be in the bluetooth group. "
-                "If the list is still empty: rfkill unblock bluetooth and check hci0."
+                f"Bluetooth scan failed ({type(exc).__name__}: {exc}). "
+                "Turn the sensor on and close Graphical Analysis if it is open."
             ) from exc
         finally:
             self._quit_adapter(adapter)
@@ -74,8 +135,12 @@ class ForceSensor:
             return "virtual force sensor"
         if not device_name:
             raise ForceSensorError("Pick a Go Direct device from the scan list.")
+        return _ble.submit(self._connect_locked, device_name, sensor_number)
+
+    def _connect_locked(self, device_name: str, sensor_number: int) -> str:
         self.disconnect()
         GoDirect = self._import_godirect()
+        _ensure_event_loop()
         adapter = GoDirect(use_ble=True, use_usb=False)
         try:
             found = adapter.list_devices() or []
@@ -107,10 +172,11 @@ class ForceSensor:
         except Exception as exc:
             self._quit_adapter(adapter)
             self.connected = False
-            self.last_error = str(exc)
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            log.exception("Force sensor connect failed")
             raise ForceSensorError(
-                f"Could not open {device_name}. Make sure Graphical Analysis is closed "
-                "and the sensor is on, then Scan again."
+                f"Could not open {device_name} ({type(exc).__name__}: {exc}). "
+                "Close Graphical Analysis, turn the sensor on, then Scan again."
             ) from exc
         sample = self.read_raw()
         if sample is None:
@@ -123,6 +189,18 @@ class ForceSensor:
         return f"reading {sample:.4f} N"
 
     def disconnect(self) -> None:
+        if threading.current_thread() is _ble._thread:
+            self._disconnect_locked()
+            return
+        if self.VIRTUAL:
+            self._disconnect_locked()
+            return
+        try:
+            _ble.submit(self._disconnect_locked)
+        except Exception:
+            self._disconnect_locked()
+
+    def _disconnect_locked(self) -> None:
         if self._device is not None:
             try:
                 self._device.stop()
@@ -142,13 +220,23 @@ class ForceSensor:
 
     def read_raw(self) -> Optional[float]:
         if self.VIRTUAL:
-            depth = self._contact_z - (self._virtual_z or 0.0)
-            if depth <= 0:
-                val = 0.005 + random.random() * 0.01
-            else:
-                val = 0.02 + depth * 0.85 + random.random() * 0.01
-            self.last_force_n = val
-            return val
+            return self._read_virtual()
+        if self._device is None:
+            return None
+        if threading.current_thread() is _ble._thread:
+            return self._read_raw_locked()
+        return _ble.submit(self._read_raw_locked)
+
+    def _read_virtual(self) -> float:
+        depth = self._contact_z - (self._virtual_z or 0.0)
+        if depth <= 0:
+            val = 0.005 + random.random() * 0.01
+        else:
+            val = 0.02 + depth * 0.85 + random.random() * 0.01
+        self.last_force_n = val
+        return val
+
+    def _read_raw_locked(self) -> Optional[float]:
         if self._device is None:
             return None
         try:

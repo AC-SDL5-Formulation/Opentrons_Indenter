@@ -7,7 +7,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT))
 
 from indenter.hardware.cnc import CNC_Machine
-from indenter.hardware.force import ForceSensor
+from indenter.hardware.force import ForceSensor, _ensure_event_loop
 from indenter.ot.protocol_gen import generate_protocol
 from indenter.run.settings import RunSettings
 from indenter.run.stress import stress_mpa
@@ -49,6 +49,26 @@ class ForceScanTests(unittest.TestCase):
         force = ForceSensor(virtual=True)
         devices = force.scan_ble()
         self.assertEqual(devices[0]["name"], "GDX-FOR VIRTUAL")
+
+    def test_event_loop_can_be_created_on_a_worker_thread(self):
+        import asyncio
+        import threading
+
+        seen = []
+
+        def worker():
+            try:
+                asyncio.get_event_loop()
+            except RuntimeError:
+                seen.append("missing")
+            _ensure_event_loop()
+            asyncio.get_event_loop()
+            seen.append("ok")
+
+        thread = threading.Thread(target=worker)
+        thread.start()
+        thread.join()
+        self.assertIn("ok", seen)
 
 
 class LayoutTests(unittest.TestCase):
