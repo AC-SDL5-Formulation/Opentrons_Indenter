@@ -1,17 +1,29 @@
-"""Go Direct force sensor wrapper. Bluetooth only for V1; no terminal prompts."""
+"""Go Direct force sensor wrapper. Bluetooth only for V1; no terminal prompts.
+
+Scan and connect use GoDirect(use_ble=True) the same way the Pi Test B command
+does. The gdx helper re-inits BLE from use_ble=False and finds nothing on Linux.
+"""
 
 from __future__ import annotations
 
 import random
-import sys
 import time
 from typing import List, Optional
-
-from indenter.paths import GDX_DIR
 
 
 class ForceSensorError(Exception):
     pass
+
+
+def _device_name(device) -> str:
+    return str(getattr(device, "name", None) or getattr(device, "_name", None) or device)
+
+
+def _device_rssi(device):
+    rssi = getattr(device, "rssi", None)
+    if rssi is None:
+        rssi = getattr(device, "_rssi", None)
+    return rssi
 
 
 class ForceSensor:
@@ -22,7 +34,9 @@ class ForceSensor:
         self.last_force_n: Optional[float] = None
         self.blank = 0.0
         self.last_error = ""
-        self._gdx = None
+        self._godirect = None
+        self._device = None
+        self._sensors = []
         self._virtual_z = 0.0
         self._contact_z = -2.0
 
@@ -32,27 +46,13 @@ class ForceSensor:
     def scan_ble(self) -> List[dict]:
         if self.VIRTUAL:
             return [{"name": "GDX-FOR VIRTUAL", "rssi": -40}]
-        gdx_mod = self._import_gdx()
-        inst = gdx_mod.gdx()
+        GoDirect = self._import_godirect()
+        adapter = GoDirect(use_ble=True, use_usb=False)
         try:
-            inst.godirect.__init__(use_ble=True, use_ble_bg=False, use_usb=False)
-            found, n = inst.find_devices()
+            found = adapter.list_devices() or []
             devices = []
-            if n and found:
-                for d in found:
-                    name = str(getattr(d, "name", d))
-                    rssi = getattr(d, "rssi", None)
-                    if rssi is None:
-                        rssi = getattr(d, "_rssi", None)
-                    devices.append({"name": name, "rssi": rssi})
-            try:
-                inst.close()
-            except Exception:
-                pass
-            try:
-                inst.godirect.stop()
-            except Exception:
-                pass
+            for device in found:
+                devices.append({"name": _device_name(device), "rssi": _device_rssi(device)})
             return devices
         except Exception as exc:
             self.last_error = str(exc)
@@ -62,6 +62,8 @@ class ForceSensor:
                 "then bluetoothctl power on. Your user must be in the bluetooth group. "
                 "If the list is still empty: rfkill unblock bluetooth and check hci0."
             ) from exc
+        finally:
+            self._quit_adapter(adapter)
 
     def connect(self, device_name: str, sensor_number: int = 1) -> str:
         self.device_name = device_name
@@ -72,18 +74,38 @@ class ForceSensor:
             return "virtual force sensor"
         if not device_name:
             raise ForceSensorError("Pick a Go Direct device from the scan list.")
-        gdx_mod = self._import_gdx()
-        if self._gdx is not None:
-            try:
-                self._gdx.close()
-            except Exception:
-                pass
-        self._gdx = gdx_mod.gdx()
+        self.disconnect()
+        GoDirect = self._import_godirect()
+        adapter = GoDirect(use_ble=True, use_usb=False)
         try:
-            self._gdx.open(connection="ble", device_to_open=device_name)
-            self._gdx.select_sensors([sensor_number])
-            self._gdx.start(period=200)
+            found = adapter.list_devices() or []
+            match = None
+            names = []
+            for device in found:
+                name = _device_name(device)
+                names.append(name)
+                if name == device_name:
+                    match = device
+                    break
+            if match is None:
+                raise ForceSensorError(
+                    f"Could not find {device_name}. Seen: {', '.join(names) or 'none'}. "
+                    "Turn the sensor on, then Scan again."
+                )
+            if not match.open():
+                raise ForceSensorError(
+                    f"Could not open {device_name}. Close Graphical Analysis and Scan again."
+                )
+            match.enable_sensors(sensors=[sensor_number])
+            self._sensors = match.get_enabled_sensors() or []
+            match.start(period=200)
+            self._godirect = adapter
+            self._device = match
+        except ForceSensorError:
+            self._quit_adapter(adapter)
+            raise
         except Exception as exc:
+            self._quit_adapter(adapter)
             self.connected = False
             self.last_error = str(exc)
             raise ForceSensorError(
@@ -101,16 +123,19 @@ class ForceSensor:
         return f"reading {sample:.4f} N"
 
     def disconnect(self) -> None:
-        if self._gdx is not None:
+        if self._device is not None:
             try:
-                self._gdx.stop()
+                self._device.stop()
             except Exception:
                 pass
             try:
-                self._gdx.close()
+                self._device.close()
             except Exception:
                 pass
-        self._gdx = None
+        self._quit_adapter(self._godirect)
+        self._godirect = None
+        self._device = None
+        self._sensors = []
         if not self.VIRTUAL:
             self.connected = False
             self.last_force_n = None
@@ -124,13 +149,23 @@ class ForceSensor:
                 val = 0.02 + depth * 0.85 + random.random() * 0.01
             self.last_force_n = val
             return val
-        if self._gdx is None:
+        if self._device is None:
             return None
-        measurements = self._gdx.read()
-        if not measurements:
-            return self.last_force_n
         try:
-            val = float(measurements[0])
+            if not self._device.read():
+                return self.last_force_n
+            sensors = self._sensors or self._device.get_enabled_sensors() or []
+            if not sensors:
+                return self.last_force_n
+            values = list(sensors[0].values or [])
+            try:
+                sensors[0].clear()
+            except Exception:
+                pass
+            if not values:
+                return self.last_force_n
+            # gdx.read() returns the negated raw value; keep that sign for thresholds.
+            val = -float(values[0])
         except (TypeError, ValueError, IndexError):
             return self.last_force_n
         self.last_force_n = val
@@ -162,15 +197,25 @@ class ForceSensor:
         self.blank = (total / count) if count else 0.0
         return self.blank
 
-    def _import_gdx(self):
-        root = str(GDX_DIR)
-        if root not in sys.path:
-            sys.path.insert(0, root)
+    def _import_godirect(self):
         try:
-            from gdx import gdx as gdx_mod
+            from godirect import GoDirect
         except ImportError as exc:
             raise ForceSensorError(
-                "The godirect / gdx library is missing. From the repo folder run: "
-                "pip install -r requirements.txt"
+                "The godirect library is missing. In the project folder, with "
+                "(.venv) active, run: pip install -r requirements.txt"
             ) from exc
-        return gdx_mod
+        return GoDirect
+
+    @staticmethod
+    def _quit_adapter(adapter) -> None:
+        if adapter is None:
+            return
+        for method in ("quit", "stop"):
+            fn = getattr(adapter, method, None)
+            if callable(fn):
+                try:
+                    fn()
+                except Exception:
+                    pass
+                return

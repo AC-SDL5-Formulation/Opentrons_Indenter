@@ -151,7 +151,7 @@ If Test A has **no** `GDX-FOR`, the website cannot find it either. Power-cycle t
 Stay in `(.venv)`. Copy this **entire single line**:
 
 ```bash
-python -c "from godirect import GoDirect; g=GoDirect(use_ble=True, use_usb=False); d=g.list_devices(); print('count', len(d)); print(d); g.stop()"
+python -c "from godirect import GoDirect; g=GoDirect(use_ble=True, use_usb=False); d=g.list_devices(); print('count', len(d)); print(d); q=getattr(g,'quit',None); q() if q else None"
 ```
 
 - **Pass:** it prints `count 1` (or more) and a device name like `GDX-FOR …`.

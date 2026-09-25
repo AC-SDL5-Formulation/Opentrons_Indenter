@@ -193,7 +193,7 @@ def api_virtual():
         if cnc._ser is None:
             cnc.connected = False
             cnc.last_status = "not connected"
-        if force._gdx is None:
+        if force._device is None:
             force.connected = False
             force.last_force_n = None
     socketio.emit("status", status_payload())

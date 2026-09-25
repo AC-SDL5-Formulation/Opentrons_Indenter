@@ -7,6 +7,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT))
 
 from indenter.hardware.cnc import CNC_Machine
+from indenter.hardware.force import ForceSensor
 from indenter.ot.protocol_gen import generate_protocol
 from indenter.run.settings import RunSettings
 from indenter.run.stress import stress_mpa
@@ -41,6 +42,13 @@ class ProtocolTests(unittest.TestCase):
         self.assertIn("dispense_reagent(DMAm_replicates", src)
         self.assertIn("UV-stand pickup/dropoff skipped", src)
         self.assertNotIn("usbmodem", src)
+
+
+class ForceScanTests(unittest.TestCase):
+    def test_virtual_scan_lists_a_device(self):
+        force = ForceSensor(virtual=True)
+        devices = force.scan_ble()
+        self.assertEqual(devices[0]["name"], "GDX-FOR VIRTUAL")
 
 
 class LayoutTests(unittest.TestCase):
