@@ -135,7 +135,7 @@ def status_payload() -> dict:
 
 def _heartbeat() -> None:
     while True:
-        time.sleep(1.0)
+        time.sleep(0.25)
         try:
             if controller.running:
                 socketio.emit("status", status_payload())
@@ -150,8 +150,8 @@ def _heartbeat() -> None:
                     force.set_virtual_z(cnc.z)
                 force.read_raw()
             socketio.emit("status", status_payload())
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"[heartbeat] {type(exc).__name__}: {exc}", flush=True)
 
 
 @app.route("/")

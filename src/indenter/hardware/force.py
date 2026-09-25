@@ -55,9 +55,18 @@ class _BleExecutor:
         self._guard = threading.Lock()
 
     def _loop(self) -> None:
-        _ensure_event_loop()
+        loop = _ensure_event_loop()
         while True:
-            job = self._jobs.get()
+            try:
+                job = self._jobs.get(timeout=0.05)
+            except queue.Empty:
+                # Keep bleak notifications flowing between Scan/Connect/read jobs.
+                try:
+                    if not loop.is_closed():
+                        loop.run_until_complete(asyncio.sleep(0.02))
+                except Exception:
+                    pass
+                continue
             if job is None:
                 return
             fn, args, kwargs, reply = job
@@ -97,6 +106,10 @@ class ForceSensor:
         self._sensors = []
         self._virtual_z = 0.0
         self._contact_z = -2.0
+        self._miss_count = 0
+        self._last_miss_log = 0.0
+        self._last_printed_n: Optional[float] = None
+        self._ok_count = 0
 
     def set_virtual_z(self, z: float) -> None:
         self._virtual_z = z if z is not None else 0.0
@@ -157,13 +170,18 @@ class ForceSensor:
                     f"Could not find {device_name}. Seen: {', '.join(names) or 'none'}. "
                     "Turn the sensor on, then Scan again."
                 )
-            if not match.open():
+            try:
+                opened = match.open(auto_start=False)
+            except TypeError:
+                opened = match.open()
+            if not opened:
                 raise ForceSensorError(
                     f"Could not open {device_name}. Close Graphical Analysis and Scan again."
                 )
             match.enable_sensors(sensors=[sensor_number])
+            match.start(period=100)
+            time.sleep(0.3)
             self._sensors = match.get_enabled_sensors() or []
-            match.start(period=200)
             self._godirect = adapter
             self._device = match
         except ForceSensorError:
@@ -178,7 +196,12 @@ class ForceSensor:
                 f"Could not open {device_name} ({type(exc).__name__}: {exc}). "
                 "Close Graphical Analysis, turn the sensor on, then Scan again."
             ) from exc
-        sample = self.read_raw()
+        sample = None
+        for _ in range(8):
+            sample = self.read_raw()
+            if sample is not None:
+                break
+            time.sleep(0.15)
         if sample is None:
             raise ForceSensorError(
                 "Connected but no force reading yet. Wait a second and click Zero."
@@ -241,23 +264,63 @@ class ForceSensor:
             return None
         try:
             if not self._device.read():
+                self._note_read_miss("device.read() returned False")
                 return self.last_force_n
-            sensors = self._sensors or self._device.get_enabled_sensors() or []
-            if not sensors:
+            sensors = self._device.get_enabled_sensors() or self._sensors or []
+            self._sensors = sensors
+            val = self._value_from_sensors(sensors)
+            if val is None:
+                self._note_read_miss("no sensor values")
                 return self.last_force_n
-            values = list(sensors[0].values or [])
+        except Exception as exc:
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            print(f"[force] read error: {self.last_error}", flush=True)
+            log.exception("Force read failed")
+            return self.last_force_n
+        self.last_force_n = val
+        self.last_error = ""
+        self._note_read_ok(val)
+        return val
+
+    def _value_from_sensors(self, sensors) -> Optional[float]:
+        preferred = []
+        others = []
+        for sensor in sensors:
+            desc = str(getattr(sensor, "sensor_description", "") or "")
+            values = list(getattr(sensor, "values", None) or [])
             try:
-                sensors[0].clear()
+                sensor.clear()
             except Exception:
                 pass
             if not values:
-                return self.last_force_n
+                continue
             # gdx.read() returns the negated raw value; keep that sign for thresholds.
-            val = -float(values[0])
-        except (TypeError, ValueError, IndexError):
-            return self.last_force_n
-        self.last_force_n = val
-        return val
+            sample = -float(values[-1])
+            if "force" in desc.lower():
+                preferred.append(sample)
+            else:
+                others.append(sample)
+        if preferred:
+            return preferred[0]
+        if others:
+            return others[0]
+        return None
+
+    def _note_read_miss(self, reason: str) -> None:
+        self._miss_count += 1
+        now = time.monotonic()
+        if now - self._last_miss_log >= 5:
+            print(f"[force] {reason} (x{self._miss_count})", flush=True)
+            self._last_miss_log = now
+            self._miss_count = 0
+
+    def _note_read_ok(self, val: float) -> None:
+        self._ok_count += 1
+        prev = self._last_printed_n
+        jumped = prev is None or abs(val - prev) >= 0.01
+        if jumped or self._ok_count % 20 == 0:
+            print(f"[force] {val:.4f} N", flush=True)
+            self._last_printed_n = val
 
     def read_stable(self, n: int = 8) -> float:
         val = 0.0
