@@ -103,19 +103,77 @@ What “good” looks like:
 
 If `list` / `hciconfig` show nothing: `sudo raspi-config` → Interface Options → Bluetooth → Enable, then reboot.
 
-#### If the website Scan is empty later (one at a time)
+If that check already looks good (`active`, `Powered: yes`, `hci0`, `bluetooth` in `groups`) but the website still says **no devices found**, the Pi radio is fine. Next, check whether the **sensor** is advertising. That is Tests A and B below — they do **not** use the website, so you can tell if the problem is the sensor or the dashboard.
 
-**Line 1** — no output is OK:
+#### Is the sensor discoverable? (do this if website Scan finds nothing)
+
+You already proved the Pi Bluetooth radio works. These two tests ask: “Can anything see the Go Direct?”
+
+**Before you start**
+
+1. On the website, if it is running, go back to the terminal and press **Ctrl+C** to stop it (so two programs are not fighting over Bluetooth).
+2. Turn the Go Direct sensor **on**. The LED should blink. Stand it next to the Pi.
+3. Close **Graphical Analysis** and disconnect the sensor from any laptop or phone.
+4. Make sure the terminal shows `(.venv)` at the start of the line. If it does not, run **this single line** from the project folder:
+
+```bash
+source .venv/bin/activate
+```
+
+Do **not** type `pair` or `connect` in any of these tests.
+
+---
+
+**Test A — Pi scan only (not our code). One line.**
+
+```bash
+bluetoothctl --timeout 20 scan le
+```
+
+Wait the full ~20 seconds. Watch the text scroll.
+
+- **Pass:** you see a line with `GDX-FOR` or `GDX-` and a long address.
+- **Also useful:** new `Device …` lines that appear only when the sensor is on.
+- If you get `[bluetooth]#`, type `quit` and press Enter.
+
+Optional follow-up (**one line**) — lists devices the Pi already noticed:
+
+```bash
+bluetoothctl devices
+```
+
+If Test A has **no** `GDX-FOR`, the website cannot find it either. Power-cycle the sensor (off 5 seconds, on), come closer, and try Test A again.
+
+---
+
+**Test B — same Python library the website uses. One line.**
+
+Stay in `(.venv)`. Copy this **entire single line**:
+
+```bash
+python -c "from godirect import GoDirect; g=GoDirect(use_ble=True, use_usb=False); d=g.list_devices(); print('count', len(d)); print(d); g.stop()"
+```
+
+- **Pass:** it prints `count 1` (or more) and a device name like `GDX-FOR …`.
+- **Fail:** `count 0`, or a red error. Write down that text.
+
+---
+
+**What the two tests mean**
+
+| Test A (`bluetoothctl`) | Test B (`python`) | What to do |
+|---|---|---|
+| Sees `GDX-FOR` | Prints that device | Radio + library are OK. Start the website again and click Scan. |
+| Sees `GDX-FOR` | `count 0` or an error | Not “Bluetooth off”. It is the Python/venv side. Keep the error text. |
+| Sees nothing | `count 0` | Sensor is not advertising. Not the dashboard. Check battery, LED blink, other computers, and do not pair it in the Pi Bluetooth menu. |
+
+If Test A passed and Test B failed, also try:
 
 ```bash
 rfkill unblock bluetooth
 ```
 
-**Line 2** — this one should list `hci0`:
-
-```bash
-bluetoothctl --timeout 5 list
-```
+(no output is OK), then run Test B again.
 
 #### Every session (website only — no extra terminal)
 
@@ -168,7 +226,7 @@ Custom labware names (`allen_8_wellplate_20000ul`, `testwell`) must already exis
 |---|---|
 | Website “address already in use” | Use `INDENTER_UI_PORT=8770 python run_indenter.py` |
 | CNC not in the port list | Cable, power, `dialout` group, Find ports again |
-| Scan finds nothing | Sensor on, Graphical Analysis closed, run the “check that Bluetooth is really on” box above, `bluetooth` group after logout, do not pair in the system Bluetooth menu |
+| Scan finds nothing | First confirm the radio check (`hci0`, `Powered: yes`). Then run **Test A** and **Test B** in “Is the sensor discoverable?”. That tells you sensor vs website. |
 | Terminal looks frozen after Bluetooth commands | You may be inside `[bluetooth]#`. Type `quit` and Enter. Next time run those lines **one at a time**. |
 | Force connected but no number | Wait a second, click Zero |
 | Pi UI feels frozen | Stay on **Low Object** |
